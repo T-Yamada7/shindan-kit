@@ -1,0 +1,21 @@
+{
+  "source_status": "MVP暫定値（要検証）。正式出典は中小企業実態基本調査（最新年度・業種別）への差し替えが必要。詳細はsme-benchmarks.mdを参照。",
+  "benchmarks": {
+    "売上高総利益率": {"value": 24.0, "higher_is_better": true},
+    "売上高営業利益率": {"value": 3.5, "higher_is_better": true},
+    "売上高経常利益率": {"value": 4.0, "higher_is_better": true},
+    "ROA": {"value": 3.0, "higher_is_better": true},
+    "ROE": {"value": 8.0, "higher_is_better": true},
+    "流動比率": {"value": 150.0, "higher_is_better": true},
+    "当座比率": {"value": 100.0, "higher_is_better": true},
+    "自己資本比率": {"value": 40.0, "higher_is_better": true},
+    "固定長期適合率": {"value": 90.0, "higher_is_better": false},
+    "負債比率": {"value": 150.0, "higher_is_better": false},
+    "総資産回転率": {"value": 1.0, "higher_is_better": true},
+    "売上債権回転率": {"value": 6.0, "higher_is_better": true},
+    "棚卸資産回転率": {"value": 8.0, "higher_is_better": true},
+    "有形固定資産回転率": {"value": 3.0, "higher_is_better": true},
+    "売上高成長率": {"value": 2.0, "higher_is_better": true},
+    "営業利益成長率": {"value": 2.0, "higher_is_better": true}
+  }
+}

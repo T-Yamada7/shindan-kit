@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """ratios.json の各指標を中小企業ベンチマークと突合する（決定論的コア）。
 
-ベンチマーク値は references/sme-benchmarks.md に出典・調査年とともに定義する。
-このスクリプトはそのファイルに記載された値をこの BENCHMARKS 辞書と同期させて使う。
+ベンチマーク値は references/sme-benchmarks.json を唯一の情報源（single source of truth）として読み込む。
+出典・調査年の解説文は references/sme-benchmarks.md に書く（数値そのものはJSON側だけを編集すればよく、
+二重管理にならない）。
 単体実行例: python benchmark.py workspace/ratios.json -o workspace/benchmark.json
 """
 import argparse
@@ -10,28 +11,15 @@ import json
 import sys
 from pathlib import Path
 
-# 指標名 -> (ベンチマーク値, 値が高いほど良いか)
-# 出典: references/sme-benchmarks.md を参照。値を更新する場合は両方のファイルを同期させること。
-BENCHMARKS = {
-    "売上高総利益率": {"value": 24.0, "higher_is_better": True},
-    "売上高営業利益率": {"value": 3.5, "higher_is_better": True},
-    "売上高経常利益率": {"value": 4.0, "higher_is_better": True},
-    "ROA": {"value": 3.0, "higher_is_better": True},
-    "ROE": {"value": 8.0, "higher_is_better": True},
-    "流動比率": {"value": 150.0, "higher_is_better": True},
-    "当座比率": {"value": 100.0, "higher_is_better": True},
-    "自己資本比率": {"value": 40.0, "higher_is_better": True},
-    "固定長期適合率": {"value": 90.0, "higher_is_better": False},
-    "負債比率": {"value": 150.0, "higher_is_better": False},
-    "総資産回転率": {"value": 1.0, "higher_is_better": True},
-    "売上債権回転率": {"value": 6.0, "higher_is_better": True},
-    "棚卸資産回転率": {"value": 8.0, "higher_is_better": True},
-    "有形固定資産回転率": {"value": 3.0, "higher_is_better": True},
-    "売上高成長率": {"value": 2.0, "higher_is_better": True},
-    "営業利益成長率": {"value": 2.0, "higher_is_better": True},
-}
+BENCHMARKS_JSON_PATH = Path(__file__).resolve().parent.parent / "references" / "sme-benchmarks.json"
 
-BENCHMARK_SOURCE = "MVP暫定値（要検証）。references/sme-benchmarks.md 参照。正式出典は中小企業実態基本調査への差し替えが必要。"
+
+def _load_benchmarks():
+    data = json.loads(BENCHMARKS_JSON_PATH.read_text(encoding="utf-8"))
+    return data["benchmarks"], data["source_status"]
+
+
+BENCHMARKS, BENCHMARK_SOURCE = _load_benchmarks()
 
 
 def evaluate(indicator_name, value):

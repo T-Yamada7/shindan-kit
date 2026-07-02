@@ -9,6 +9,7 @@ import argparse
 import csv
 import json
 import sys
+import unicodedata
 from pathlib import Path
 
 # 正規科目名 -> 別名リスト（正式名自体も別名リストに含める）
@@ -47,15 +48,59 @@ def _build_alias_lookup():
 
 ALIAS_LOOKUP = _build_alias_lookup()
 
+# 損益整合性チェックの許容誤差（丸め誤差を吸収するための最小限の許容幅）
+_CONSISTENCY_ABS_TOLERANCE = 1.0
+_CONSISTENCY_REL_TOLERANCE = 0.0005
+
 
 class ValidationError(Exception):
     pass
 
 
+def _parse_value(raw_value):
+    """全角数字・カンマ区切りを許容して数値に変換する。変換できなければ None を返す。"""
+    normalized = unicodedata.normalize("NFKC", raw_value).replace(",", "").strip()
+    try:
+        return float(normalized)
+    except ValueError:
+        return None
+
+
+def _within_tolerance(actual, expected):
+    tolerance = max(_CONSISTENCY_ABS_TOLERANCE, abs(expected) * _CONSISTENCY_REL_TOLERANCE)
+    return abs(actual - expected) <= tolerance
+
+
+def _check_pl_consistency(periods):
+    """販管費・営業外収益・営業外費用を用いて営業利益・経常利益の入力値の整合性を検証する。
+
+    これらの科目は他の指標計算には使われないため、入力データの検算にのみ使う。
+    不整合は推測で無視せず、必須科目不足と同様にエラーとして列挙する。
+    """
+    issues = []
+    for period, acc in sorted(periods.items()):
+        gross_profit = acc["売上高"] - acc["売上原価"]
+        expected_operating = gross_profit - acc["販売費及び一般管理費"]
+        if not _within_tolerance(acc["営業利益"], expected_operating):
+            issues.append(
+                f"  {period}: 営業利益の入力値({acc['営業利益']:g})が"
+                f"(売上高-売上原価-販管費)の計算値({expected_operating:g})と一致しません"
+            )
+
+        expected_ordinary = acc["営業利益"] + acc["営業外収益"] - acc["営業外費用"]
+        if not _within_tolerance(acc["経常利益"], expected_ordinary):
+            issues.append(
+                f"  {period}: 経常利益の入力値({acc['経常利益']:g})が"
+                f"(営業利益+営業外収益-営業外費用)の計算値({expected_ordinary:g})と一致しません"
+            )
+    return issues
+
+
 def normalize_csv(path):
     """CSV(period,item,value)を読み込み、{period: {正規科目名: 値}} を返す。
 
-    マッピング不能な科目や必須科目の不足があれば ValidationError を送出する。
+    マッピング不能な科目、必須科目の不足、同一科目への重複マッピング、
+    損益項目間の整合性エラーがあれば ValidationError を送出する。
     """
     rows = []
     with open(path, encoding="utf-8-sig", newline="") as f:
@@ -65,6 +110,7 @@ def normalize_csv(path):
 
     unmapped = set()
     periods = {}
+    duplicate_sources = {}  # (period, canonical) -> [item, ...]（衝突検出用）
     for row in rows:
         period = row["period"].strip()
         item = row["item"].strip()
@@ -73,12 +119,14 @@ def normalize_csv(path):
         if canonical is None:
             unmapped.add(item)
             continue
-        try:
-            value = float(raw_value)
-        except ValueError:
+        value = _parse_value(raw_value)
+        if value is None:
             raise ValidationError(
                 f"期間 {period} の科目「{item}」の値「{raw_value}」が数値ではありません"
             )
+
+        key = (period, canonical)
+        duplicate_sources.setdefault(key, []).append(item)
         periods.setdefault(period, {})[canonical] = value
 
     if unmapped:
@@ -87,6 +135,18 @@ def normalize_csv(path):
             "推測はできないため、references/input-format.md の対応表を確認し、"
             "元の科目名を正規科目名（またはその別名）に修正して再実行してください:\n"
             + "\n".join(f"  - {item}" for item in sorted(unmapped))
+        )
+
+    duplicates = {k: v for k, v in duplicate_sources.items() if len(v) > 1}
+    if duplicates:
+        lines = [
+            f"  {period}: 「{canonical}」に複数の科目行がマッピングされています ({', '.join(items)})"
+            for (period, canonical), items in sorted(duplicates.items())
+        ]
+        raise ValidationError(
+            "同一期間・同一正規科目に複数の入力行が対応しています。"
+            "どちらが正しいかを推測できないため、重複行を削除・統合してから再実行してください:\n"
+            + "\n".join(lines)
         )
 
     missing_report = {}
@@ -98,6 +158,13 @@ def normalize_csv(path):
     if missing_report:
         lines = [f"  {period}: " + ", ".join(missing) for period, missing in missing_report.items()]
         raise ValidationError("以下の期間で必須科目が不足しています:\n" + "\n".join(lines))
+
+    consistency_issues = _check_pl_consistency(periods)
+    if consistency_issues:
+        raise ValidationError(
+            "損益項目間の整合性が取れていません。入力ミスの可能性があるため確認してください:\n"
+            + "\n".join(consistency_issues)
+        )
 
     return periods
 

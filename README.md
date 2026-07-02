@@ -1,5 +1,7 @@
 # shindan-kit
 
+[![tests](https://github.com/T-Yamada7/shindan-kit/actions/workflows/tests.yml/badge.svg)](https://github.com/T-Yamada7/shindan-kit/actions/workflows/tests.yml)
+
 > LLMは数字を計算しません。解釈するだけです。
 
 中小企業診断士の実務フレーム（財務分析・SWOT/3C・業務フロー分析・AI適用診断）で企業を診断する Claude Code skill パック。決算書とヒアリングメモを入れると、実務フレームに沿った経営診断レポートが出てくる。
@@ -17,6 +19,16 @@
 - 株価予測、Valuation、売買推奨 → 既存OSSの領域
 - データ取得基盤の自作 → EDINET DB等の既存MCPを上流として使う分析レイヤーに徹する
 - 税務申告 → 既存OSSの領域
+
+## インストール
+
+```bash
+git clone https://github.com/T-Yamada7/shindan-kit.git
+mkdir -p ~/.claude/skills && cp -r shindan-kit/skills/zaimu-shindan ~/.claude/skills/
+cp -r shindan-kit/agents/* ~/.claude/agents/   # サブエージェントも使う場合
+```
+
+Claude Codeのプロジェクト単位で使いたい場合は、上記の代わりにプロジェクト直下に `.claude/skills/zaimu-shindan` として配置してもよい（`~/.claude/` はユーザー単位でどのプロジェクトでも有効）。marketplace経由のインストールは `.claude-plugin/plugin.json` を参照。
 
 ## 使い方（Phase 1: zaimu-shindan）
 
@@ -50,10 +62,11 @@ python skills/zaimu-shindan/scripts/benchmark.py workspace/ratios.json -o worksp
 
 ```
 shindan-kit/
+├── .github/workflows/      # CI（pytest）
 ├── skills/zaimu-shindan/   # Phase 1: 財務診断skill
 │   ├── SKILL.md
 │   ├── scripts/            # calc_ratios.py / validate_input.py / benchmark.py
-│   ├── references/         # 指標定義・ベンチマーク・入力仕様
+│   ├── references/         # 指標定義・ベンチマーク（json+md）・入力仕様
 │   └── assets/             # 入力テンプレートCSV
 ├── agents/                 # zaimu-analyst（sonnet）/ fact-checker（haiku）
 ├── examples/sample-sme/    # 架空中小製造業3期分（業績悪化シナリオ）
@@ -64,7 +77,7 @@ shindan-kit/
 
 - **士業境界**: 経営診断は独占業務ではないが、「専門家の判断を代替しない」ことを明記する。ポジショニングは「診断士・コンサル・投資家の下書き部隊」
 - **投資助言規制への配慮**: `investor`レンズは事実と診断士フレームの整理に徹し、売買判断に踏み込まない
-- **ベンチマークデータの出典**: 公的統計のみ使用予定。**現状 `references/sme-benchmarks.md` はMVP用の暫定値であり、正式な公的統計への差し替えが必要**（詳細は当該ファイル参照）
+- **ベンチマークデータの出典**: 公的統計のみ使用予定。**現状 `references/sme-benchmarks.json`（唯一の情報源）はMVP用の暫定値であり、正式な公的統計への差し替えが必要**（詳細は `references/sme-benchmarks.md` 参照）
 - **勘定科目マッピングの誤り**: 推測禁止・エラー列挙方式で対処（`references/input-format.md`参照）
 
 ## 開発時の約束事

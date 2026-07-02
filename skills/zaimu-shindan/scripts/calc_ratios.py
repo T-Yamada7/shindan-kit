@@ -7,11 +7,42 @@ LLMは財務指標を自分で暗算・推定してはならない。
 """
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from validate_input import normalize_csv, ValidationError  # noqa: E402
+
+_YEAR_PATTERN = re.compile(r"(\d{4})")
+
+
+def infer_chronological_order(period_names):
+    """period名から4桁の年を抽出し、時系列の古い順にソートしたリストを返す。
+
+    CSVの記載順を時系列の根拠にはしない。決算書エクスポートは最新期が先頭に
+    並ぶことも多く、記載順をそのまま信用すると前期比較（yoy_change・成長率）が
+    黙って逆向きに計算される。年が一意に抽出できない、または複数ラベルが
+    同じ年を指す場合は推測せず ValidationError を送出する。
+    """
+    years = {}
+    for name in period_names:
+        matches = _YEAR_PATTERN.findall(name)
+        if len(matches) != 1:
+            raise ValidationError(
+                f"期間ラベル「{name}」から時系列順を判定するための4桁の年を"
+                "一意に抽出できません。FY2021のように4桁の年を含む一意なラベルに"
+                "変更してください（例:「令和5年度」ではなく「FY2023」）。"
+            )
+        years[name] = int(matches[0])
+
+    if len(set(years.values())) != len(years):
+        raise ValidationError(
+            "複数の期間ラベルから同じ年が抽出され、時系列順を一意に判定できません: "
+            + ", ".join(period_names)
+        )
+
+    return sorted(period_names, key=lambda n: years[n])
 
 
 def _safe_div(numerator, denominator):
@@ -147,16 +178,30 @@ def compute_period_ratios(cur, prev):
 
 
 def compute_all(periods):
-    """periods: {period: 正規化済み科目辞書}。挿入順=時系列の古い順を前提とする。"""
-    period_names = list(periods.keys())
+    """periods: {period: 正規化済み科目辞書}。
+
+    時系列順はCSVの記載順ではなく、period名から抽出した年（infer_chronological_order）
+    で決定する。CSVの記載順と時系列順が異なっていた場合は periods_order_note に
+    その旨を記録し、黙って並べ替えたことにしない。
+    """
+    csv_order = list(periods.keys())
+    chronological_order = infer_chronological_order(csv_order)
+
     result = {}
-    for i, name in enumerate(period_names):
-        prev = periods[period_names[i - 1]] if i > 0 else None
+    for i, name in enumerate(chronological_order):
+        prev = periods[chronological_order[i - 1]] if i > 0 else None
         result[name] = compute_period_ratios(periods[name], prev)
-    return {
-        "periods_order": period_names,
+
+    output = {
+        "periods_order": chronological_order,
         "ratios": result,
     }
+    if chronological_order != csv_order:
+        output["periods_order_note"] = (
+            "CSVの記載順と時系列順（期間ラベルの年）が異なっていたため、時系列の古い順に"
+            f"並べ替えて計算しました。CSV記載順: {csv_order}"
+        )
+    return output
 
 
 def main():

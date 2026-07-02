@@ -4,6 +4,7 @@
 calc_ratios.py を実行した結果であり、各指標の定義式（skills/zaimu-shindan/references/ratio-definitions.md）
 に基づき手計算でも検算済みの値である。
 """
+import csv
 import json
 import sys
 from pathlib import Path
@@ -15,8 +16,8 @@ SCRIPTS_DIR = REPO_ROOT / "skills" / "zaimu-shindan" / "scripts"
 SAMPLE_CSV = REPO_ROOT / "examples" / "sample-sme" / "kessan.csv"
 
 sys.path.insert(0, str(SCRIPTS_DIR))
-from calc_ratios import compute_all  # noqa: E402
-from validate_input import normalize_csv  # noqa: E402
+from calc_ratios import compute_all, infer_chronological_order  # noqa: E402
+from validate_input import ValidationError, normalize_csv  # noqa: E402
 
 GOLDEN = {
     "FY2021": {
@@ -117,3 +118,107 @@ def test_json_roundtrip_is_stable(ratios):
     # JSON化しても値が壊れないことを確認する。
     dumped = json.loads(json.dumps(ratios, ensure_ascii=False))
     assert dumped == ratios
+
+
+# --- 期間順序の回帰テスト（レビュー指摘の重大バグ） ---
+# CSVの記載順を時系列順として信用すると、記載順が新しい期から先だった場合に
+# 成長率・yoy_changeが黙って逆向きに計算されるバグがあった。
+
+
+def _write_csv(path, rows):
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["period", "item", "value"])
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def test_reversed_csv_order_still_yields_correct_chronology(tmp_path):
+    original_rows = list(csv.DictReader(open(SAMPLE_CSV, encoding="utf-8")))
+    by_period = {}
+    for row in original_rows:
+        by_period.setdefault(row["period"], []).append(row)
+
+    reversed_csv = tmp_path / "reversed.csv"
+    reversed_rows = []
+    for period in reversed(list(by_period.keys())):
+        reversed_rows.extend(by_period[period])
+    _write_csv(reversed_csv, reversed_rows)
+
+    periods = normalize_csv(reversed_csv)
+    result = compute_all(periods)
+
+    assert result["periods_order"] == ["FY2021", "FY2022", "FY2023"]
+    assert "periods_order_note" in result
+    for period, expected in GOLDEN.items():
+        for indicator, value in expected.items():
+            assert result["ratios"][period][indicator]["value"] == value
+
+
+def test_forward_csv_order_has_no_reorder_note(ratios):
+    assert "periods_order_note" not in ratios
+
+
+def test_ambiguous_period_label_raises():
+    with pytest.raises(ValidationError):
+        infer_chronological_order(["令和4年度", "令和5年度"])
+
+
+def test_duplicate_year_in_labels_raises():
+    with pytest.raises(ValidationError):
+        infer_chronological_order(["FY2021-A", "FY2021-B"])
+
+
+def test_single_period_order_is_trivial():
+    assert infer_chronological_order(["FY2022"]) == ["FY2022"]
+
+
+# --- エイリアス衝突（同一正規科目への複数マッピング）の回帰テスト ---
+
+
+def test_duplicate_alias_mapping_raises(tmp_path):
+    bad_csv = tmp_path / "dup_alias.csv"
+    _write_csv(bad_csv, [
+        {"period": "FY2022", "item": "売上高", "value": "100"},
+        {"period": "FY2022", "item": "受取手形及び売掛金", "value": "10"},
+        {"period": "FY2022", "item": "売掛金", "value": "20"},
+    ])
+    with pytest.raises(ValidationError, match="複数の入力行"):
+        normalize_csv(bad_csv)
+
+
+# --- 損益整合性チェックの回帰テスト ---
+
+
+def test_pl_inconsistency_raises(tmp_path):
+    rows = list(csv.DictReader(open(SAMPLE_CSV, encoding="utf-8")))
+    tampered = []
+    for row in rows:
+        if row["period"] == "FY2021" and row["item"] == "営業利益":
+            row = dict(row, value="99999999")
+        tampered.append(row)
+    bad_csv = tmp_path / "inconsistent.csv"
+    _write_csv(bad_csv, tampered)
+
+    with pytest.raises(ValidationError, match="損益項目間の整合性"):
+        normalize_csv(bad_csv)
+
+
+# --- カンマ区切り・全角数字の受理テスト ---
+
+
+def test_comma_and_fullwidth_numbers_are_normalized(tmp_path):
+    rows = list(csv.DictReader(open(SAMPLE_CSV, encoding="utf-8")))
+    reformatted = []
+    for row in rows:
+        value = row["value"]
+        if row["period"] == "FY2021" and row["item"] == "売上高":
+            value = "５００，０００"  # 全角数字・全角カンマ
+        elif row["period"] == "FY2021" and row["item"] == "資産合計":
+            value = "400,000"  # 半角カンマ区切り
+        reformatted.append(dict(row, value=value))
+    reformatted_csv = tmp_path / "reformatted.csv"
+    _write_csv(reformatted_csv, reformatted)
+
+    periods = normalize_csv(reformatted_csv)
+    assert periods["FY2021"]["売上高"] == 500000.0
+    assert periods["FY2021"]["資産合計"] == 400000.0
