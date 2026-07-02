@@ -1,0 +1,15 @@
+{
+  "name": "shindan-kit",
+  "version": "0.1.0",
+  "description": "中小企業診断士の実務フレームで企業を診断するClaude Code skillパック。数値計算は100%決定論的なPython、LLMは解釈と提案のみ。",
+  "author": {
+    "name": "shindan-kit contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "financial-analysis",
+    "中小企業診断士",
+    "zaimu-shindan",
+    "decision-support"
+  ]
+}
